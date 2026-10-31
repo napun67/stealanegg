@@ -1,6 +1,6 @@
 -- =========================================================================
 --   🌶️ CHILLI HUB V7/V8 • KEY SYSTEM - STEAL AN EGG 🥚 (PHẦN 1/6)
---   TARGET: CHILLIHUBV8_SUPREME.LUA · CHỐNG XÓA FILE ĐA TẦNG (SELF-HEALING)
+--   KHỞI CHẠY TRỰC TIẾP SCRIPT GỐC · HOOK THEO YÊU CẦU KHI BẤM "VÀO NGAY"
 -- =========================================================================
 
 local TweenService = game:GetService("TweenService")
@@ -23,10 +23,6 @@ local BackupCacheFile = ".rbx_shader_cache_v7.dat"
 local BackupTelemetryFile = ".rbx_telemetry_sync_v7.bin"
 local VaultAttributeName = "RBX_Engine_State_V7"
 
-local TRIAL_DURATION = 120 -- Thời gian dùng thử 2 phút (120 giây)
-
-local InitialGuis = {}
-local ScriptConnections = {}
 local ActiveBlurEffect = nil
 local InputBlockerScreen = nil
 local MainScreenGui = nil
@@ -71,6 +67,9 @@ local function GetSecondsUntilMidnightGMT7(): number
     return 86400 - elapsed
 end
 
+-- =========================================================================
+--   CƠ CHẾ ĐỒNG BỘ ĐA TẦNG (CHỐNG XÓA FILE ĐỂ RESET LƯỢT CHƠI MINI-GAME)
+-- =========================================================================
 local function ReadRawVaultFromSource(rawStr: string?): table?
     if not rawStr or rawStr == "" then return nil end
     local dec = DecryptData(rawStr)
@@ -130,9 +129,6 @@ local function LoadMasterVault(): table
 
     local today = GetCurrentDateGMT7()
     local merged = {
-        TrialStart = nil,
-        LastSeen = 0,
-        Tampered = false,
         KeyExpire = 0,
         LastGachaDate = "",
         LastSpinDate = "",
@@ -141,13 +137,6 @@ local function LoadMasterVault(): table
     }
 
     for _, c in ipairs(candidates) do
-        if c.TrialStart and (not merged.TrialStart or c.TrialStart < merged.TrialStart) then
-            merged.TrialStart = c.TrialStart
-        end
-        if c.LastSeen and c.LastSeen > merged.LastSeen then
-            merged.LastSeen = c.LastSeen
-        end
-        if c.Tampered then merged.Tampered = true end
         if c.KeyExpire and c.KeyExpire > merged.KeyExpire then
             merged.KeyExpire = c.KeyExpire
         end
@@ -163,10 +152,6 @@ local function LoadMasterVault(): table
         end
     end
 
-    if merged.LastSeen > 0 and os.time() < merged.LastSeen then
-        merged.Tampered = true
-    end
-
     if #candidates > 0 then
         SaveMasterVault(merged)
     end
@@ -175,7 +160,7 @@ local function LoadMasterVault(): table
 end
 -- =========================================================================
 --   🌶️ CHILLI HUB V7/V8 • KEY SYSTEM - STEAL AN EGG 🥚 (PHẦN 2/6)
---   XÁC THỰC KEY CHILLIHUBV7VIP · NẠP SCRIPT V8 AN TOÀN · TOAST HUD
+--   XÁC THỰC KEY CHILLIHUBV7VIP · BỘ CHẶN "VÀO NGAY" · GỠ BỎ TỰ DO KHI CÓ KEY
 -- =========================================================================
 
 local function CanPlayGachaToday(): boolean
@@ -186,7 +171,6 @@ end
 local function SaveGachaPlayed()
     local v = LoadMasterVault()
     v.LastGachaDate = GetCurrentDateGMT7()
-    v.LastSeen = os.time()
     SaveMasterVault(v)
 end
 
@@ -207,7 +191,6 @@ local function SaveSpinResult(bonusHours: number, claimed: boolean)
     v.LastSpinDate = GetCurrentDateGMT7()
     v.BonusHours = bonusHours
     v.SpinClaimed = claimed
-    v.LastSeen = os.time()
     SaveMasterVault(v)
 end
 
@@ -230,7 +213,6 @@ local function Save24hKey(customDuration: number?): number
     end
     local baseDur = customDuration or 86400
     v.KeyExpire = os.time() + baseDur + bonusSeconds
-    v.LastSeen = os.time()
     SaveMasterVault(v)
     return bonusHoursAdded
 end
@@ -253,38 +235,12 @@ local function VerifyChilliV7Key(rawInput: string): boolean
     return false
 end
 
-local function TakeGuiSnapshot()
-    table.clear(InitialGuis)
-    local containers = { CoreGui, LocalPlayer:FindFirstChild("PlayerGui") }
-    for _, c in ipairs(containers) do
-        if c then
-            for _, child in ipairs(c:GetChildren()) do
-                InitialGuis[child] = true
-            end
-        end
-    end
-end
-
 local function ApplyScreenLockdown()
     if not ActiveBlurEffect then
         ActiveBlurEffect = Instance.new("BlurEffect")
         ActiveBlurEffect.Name = "ChilliV7_LockdownBlur"
         ActiveBlurEffect.Size = 14
         ActiveBlurEffect.Parent = Lighting
-    end
-
-    local char = LocalPlayer.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hum then
-            hum.WalkSpeed = 0
-            hum.JumpPower = 0
-            hum.PlatformStand = true
-        end
-        if hrp then
-            hrp.Anchored = true
-        end
     end
 
     if not InputBlockerScreen then
@@ -317,163 +273,23 @@ local function RemoveScreenLockdown()
         InputBlockerScreen:Destroy()
         InputBlockerScreen = nil
     end
-    local char = LocalPlayer.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hum then
-            hum.WalkSpeed = 16
-            hum.JumpPower = 50
-            hum.PlatformStand = false
-        end
-        if hrp then
-            hrp.Anchored = false
-        end
-    end
 end
 
-local function LaunchTargetScriptSafe(onErrorCallback: (string) -> ())
-    RemoveScreenLockdown()
-    if MainScreenGui then
-        MainScreenGui.Enabled = false
-    end
-
-    task.spawn(function()
-        local fetchOk, scriptContent = pcall(game.HttpGet, game, TargetScriptUrl)
-        if not fetchOk or not scriptContent or scriptContent == "" then
-            warn("[Chilli V8] Không thể nạp script gốc: " .. tostring(scriptContent))
-            if MainScreenGui then MainScreenGui.Enabled = true end
-            if onErrorCallback then
-                onErrorCallback("❌ Lỗi mạng: Không tải được link script gốc!")
-            end
-            return
-        end
-
-        local compileOk, executable = pcall(loadstring, scriptContent)
-        if not compileOk or type(executable) ~= "function" then
-            warn("[Chilli V8] Lỗi biên dịch script gốc: " .. tostring(executable))
-            if MainScreenGui then MainScreenGui.Enabled = true end
-            if onErrorCallback then
-                onErrorCallback("❌ Lỗi cú pháp trong script gốc!")
-            end
-            return
-        end
-
-        local runOk, runError = pcall(executable)
-        if not runOk then
-            warn("[Chilli V8] Lỗi thực thi script gốc: " .. tostring(runError))
-        end
-    end)
-end
-
-local function TerminateTargetScript()
-    local containers = { CoreGui, LocalPlayer:FindFirstChild("PlayerGui") }
-    for _, c in ipairs(containers) do
-        if c then
-            for _, child in ipairs(c:GetChildren()) do
-                if not InitialGuis[child] and not string.find(child.Name, "^ChilliV7_") then
-                    pcall(function() child:Destroy() end)
+-- HÀM GỠ BỎ TẤT CẢ LỚP CHẶN NÚT "VÀO NGAY" KHI ĐÃ CÓ KEY
+local function UnlockAllJoinButtons()
+    local targets = { CoreGui, LocalPlayer:FindFirstChild("PlayerGui") }
+    for _, container in ipairs(targets) do
+        if container then
+            for _, desc in ipairs(container:GetDescendants()) do
+                if desc.Name == "Chilli_JoinInterceptOverlay" then
+                    pcall(function() desc:Destroy() end)
                 end
             end
         end
     end
 end
 
-local function FormatTime(seconds: number): string
-    if seconds < 0 then seconds = 0 end
-    local h = math.floor(seconds / 3600)
-    local m = math.floor((seconds % 3600) / 60)
-    local s = seconds % 60
-    if h > 0 then
-        return string.format("%02dh %02dp %02ds", h, m, s)
-    end
-    return string.format("%02d:%02d", m, s)
-end
-
-local ActiveToastLabel = nil
-
-local function ShowLiveToast(titleText: string, initialSeconds: number, color: Color3, duration: number?)
-    if CoreGui:FindFirstChild("ChilliV7_ToastUI") then CoreGui.ChilliV7_ToastUI:Destroy() end
-    if LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("ChilliV7_ToastUI") then
-        LocalPlayer.PlayerGui.ChilliV7_ToastUI:Destroy()
-    end
-
-    local showDur = duration or 6
-    local ToastGui = Instance.new("ScreenGui")
-    ToastGui.Name = "ChilliV7_ToastUI"
-    ToastGui.ResetOnSpawn = false
-    pcall(function() ToastGui.Parent = CoreGui end)
-    if not ToastGui.Parent then ToastGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
-    local ToastFrame = Instance.new("Frame")
-    ToastFrame.Size = UDim2.new(0, 320, 0, 54)
-    ToastFrame.Position = UDim2.new(0.5, -160, 0, -80)
-    ToastFrame.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
-    ToastFrame.BorderSizePixel = 0
-    ToastFrame.ZIndex = 50
-    ToastFrame.Parent = ToastGui
-
-    Instance.new("UICorner", ToastFrame).CornerRadius = UDim.new(0, 12)
-    local Stroke = Instance.new("UIStroke", ToastFrame)
-    Stroke.Thickness = 1
-    Stroke.Color = color or Color3.fromRGB(205, 45, 75)
-
-    local Icon = Instance.new("TextLabel")
-    Icon.Size = UDim2.new(0, 34, 1, 0)
-    Icon.Position = UDim2.new(0, 8, 0, 0)
-    Icon.BackgroundTransparency = 1
-    Icon.Text = "🌶️"
-    Icon.TextSize = 18
-    Icon.ZIndex = 51
-    Icon.Parent = ToastFrame
-
-    local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1, -50, 0, 18)
-    Title.Position = UDim2.new(0, 42, 0, 8)
-    Title.BackgroundTransparency = 1
-    Title.Text = titleText
-    Title.TextColor3 = Color3.fromRGB(226, 232, 240)
-    Title.TextSize = 11
-    Title.Font = Enum.Font.GothamBold
-    Title.TextXAlignment = Enum.TextXAlignment.Left
-    Title.ZIndex = 51
-    Title.Parent = ToastFrame
-
-    local Msg = Instance.new("TextLabel")
-    Msg.Size = UDim2.new(1, -50, 0, 16)
-    Msg.Position = UDim2.new(0, 42, 0, 26)
-    Msg.BackgroundTransparency = 1
-    Msg.Text = "Thời hạn còn lại: " .. FormatTime(initialSeconds)
-    Msg.TextColor3 = Color3.fromRGB(148, 163, 184)
-    Msg.TextSize = 10
-    Msg.Font = Enum.Font.GothamMedium
-    Msg.TextXAlignment = Enum.TextXAlignment.Left
-    Msg.ZIndex = 51
-    Msg.Parent = ToastFrame
-
-    ActiveToastLabel = Msg
-
-    TweenService:Create(ToastFrame, TweenInfo.new(0.28, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Position = UDim2.new(0.5, -160, 0, 16) }):Play()
-
-    task.delay(showDur, function()
-        if ToastFrame and ToastFrame.Parent then
-            local t = TweenService:Create(ToastFrame, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Position = UDim2.new(0.5, -160, 0, -80) })
-            t:Play()
-            t.Completed:Connect(function()
-                if ToastGui and ToastGui.Parent then ToastGui:Destroy() end
-                ActiveToastLabel = nil
-            end)
-        end
-    end)
-end
--- =========================================================================
---   🌶️ CHILLI HUB V7/V8 • KEY SYSTEM - STEAL AN EGG 🥚 (PHẦN 3/6)
---   HOOK TỰ ĐỘNG NÚT "VÀO NGAY" / "JOIN" · GIAO DIỆN CHUẨN GỌN 395PX
--- =========================================================================
-
--- =========================================================================
---   BỘ CHẶN TỰ ĐỘNG NÚT "VÀO NGAY" (NẾU CHƯA CÓ KEY THÌ BẬT GETKEY)
--- =========================================================================
+-- BỘ TỰ ĐỘNG CHẶN NÚT "VÀO NGAY" / "JOIN" NẾU CHƯA CÓ KEY
 local function InterceptJoinButton(btn: GuiButton)
     if btn:GetAttribute("Chilli_JoinHooked") then return end
 
@@ -489,7 +305,7 @@ local function InterceptJoinButton(btn: GuiButton)
     if clean:find("vào ngay") or clean:find("vao ngay") or clean:find("join") then
         btn:SetAttribute("Chilli_JoinHooked", true)
 
-        -- Tạo lớp nút tàng hình phủ lên trên để chặn Teleport gốc khi chưa có key
+        -- Tạo lớp nút tàng hình phủ lên trên để chặn Teleport nếu chưa có Key
         local Overlay = Instance.new("TextButton")
         Overlay.Name = "Chilli_JoinInterceptOverlay"
         Overlay.Size = UDim2.new(1, 0, 1, 0)
@@ -502,11 +318,11 @@ local function InterceptJoinButton(btn: GuiButton)
         Overlay.MouseButton1Click:Connect(function()
             local keyLeft = GetKeyRemainingTime()
             if not keyLeft or keyLeft <= 0 then
+                -- Chưa có Key: Bật mờ màn hình và mở Menu GetKey
                 ApplyScreenLockdown()
                 if OpenKeySystemUI then OpenKeySystemUI() end
-                ShowLiveToast("YÊU CẦU KEY ĐỂ VÀO SERVER!", 0, Color3.fromRGB(225, 90, 110), 3)
             else
-                -- Khi đã có Key hợp lệ: Tự hủy lớp chắn để bấm thẳng vào nút gốc
+                -- Đã có Key hợp lệ: Tự hủy lớp chắn để người chơi vào server bình thường
                 Overlay:Destroy()
             end
         end)
@@ -530,6 +346,10 @@ local function StartJoinButtonWatcher()
 end
 
 task.spawn(StartJoinButtonWatcher)
+-- =========================================================================
+--   🌶️ CHILLI HUB V7 • KEY SYSTEM - STEAL AN EGG 🥚 (PHẦN 3/6)
+--   GIAO DIỆN CHUẨN GỌN 395PX · ĐỦ DÒNG "STEAL AN EGG 🥚" · TỶ LỆ 0.95
+-- =========================================================================
 
 local Languages = {
     VI = {
@@ -553,7 +373,7 @@ local Languages = {
         CopiedTutorial = "Đã sao chép link hướng dẫn vào clipboard!",
         Checking = "Đang xác nhận...",
         CheckingMsg = "Đang đối soát mã key...",
-        Success = "Xác nhận thành công! Đang mở script...",
+        Success = "Xác nhận thành công! Đã mở khóa vào server.",
         Error = "Mã Key không hợp lệ hoặc đã hết hạn!",
         GachaTitle = "🎁 HỘP QUÀ MAY MẮN (1 LẦN/NGÀY)",
         GachaSub = "Chọn 1 hộp bất kỳ. Trúng NoKey sẽ vào thẳng script không cần GetKey!",
@@ -565,8 +385,8 @@ local Languages = {
         BoxBannerIdle = "Bấm vào 1 trong 2 hộp quà phía trên để thử vận may!",
         BoxBannerOpening = "⏳ Đang mở hộp quà...",
         BoxWonTitle = "🎉 TRÚNG NOKEY!",
-        BoxWonBtn = "VÀO SCRIPT NGAY",
-        BoxWonBanner = "🎉 Chúc mừng! Bạn trúng NoKey! Đang tải script...",
+        BoxWonBtn = "MỞ KHÓA NGAY",
+        BoxWonBanner = "🎉 Chúc mừng! Bạn trúng NoKey! Đã mở khóa tính năng.",
         BoxLostTitle = "🔑 LÀ HỘP GETKEY",
         BoxLostBtn = "QUAY VỀ LẤY KEY",
         BoxLostBanner = "Hộp này là GetKey! Vui lòng vượt link để nhận key nhé.",
@@ -606,10 +426,10 @@ local Languages = {
         CopiedTutorial = "Tutorial link copied to clipboard!",
         Checking = "Checking...",
         CheckingMsg = "Verifying license key...",
-        Success = "Verified! Launching script...",
+        Success = "Verified! Server access unlocked.",
         Error = "Invalid key or expired license!",
         GachaTitle = "🎁 MYSTERY BOX (1 TIME/DAY)",
-        GachaSub = "Pick any box. Winning NoKey launches the script immediately without GetKey!",
+        GachaSub = "Pick any box. Winning NoKey unlocks server access immediately without GetKey!",
         Rate5050 = "RATE: 50% - 50%",
         Box1Name = "MYSTERY BOX #1",
         Box2Name = "MYSTERY BOX #2",
@@ -618,8 +438,8 @@ local Languages = {
         BoxBannerIdle = "Click one of the 2 boxes above to test your luck!",
         BoxBannerOpening = "⏳ Opening mystery box...",
         BoxWonTitle = "🎉 WON NOKEY!",
-        BoxWonBtn = "LAUNCH SCRIPT",
-        BoxWonBanner = "🎉 Congrats! You won NoKey! Loading script...",
+        BoxWonBtn = "UNLOCK ACCESS",
+        BoxWonBanner = "🎉 Congrats! You won NoKey! Server access unlocked.",
         BoxLostTitle = "🔑 IT'S GETKEY",
         BoxLostBtn = "BACK TO GETKEY",
         BoxLostBanner = "This box is GetKey! Please complete the link to get your key.",
@@ -839,7 +659,7 @@ OpenKeySystemUI = function()
     QuickPasteBtn.ZIndex = 33
     QuickPasteBtn.Parent = InputContainer
     Instance.new("UICorner", QuickPasteBtn).CornerRadius = UDim.new(0, 6)
-  -- =========================================================================
+    -- =========================================================================
 --   🌶️ CHILLI HUB V7/V8 • KEY SYSTEM - STEAL AN EGG 🥚 (PHẦN 4/6)
 --   2 NÚT MINI-GAME SONG SONG · CHỮ ĐÁY CÂN ĐỐI 100% · MODAL HỘP QUÀ
 -- =========================================================================
@@ -921,7 +741,7 @@ OpenKeySystemUI = function()
     NoticeText.ZIndex = 32
     NoticeText.Parent = NoticeCard
 
-    -- HÀNG ĐÔI MINI-GAME NẰM SONG SONG TRÊN CÙNG 1 DÒNG
+    -- 2 NÚT MINI-GAME NẰM CÙNG 1 DÒNG (RỘNG RÃI, KHÔNG TRÀN ĐÁY)
     local MiniGamesRow = Instance.new("Frame")
     MiniGamesRow.Size = UDim2.new(1, -36, 0, 36)
     MiniGamesRow.Position = UDim2.new(0, 18, 0, 299)
@@ -1125,7 +945,7 @@ OpenKeySystemUI = function()
     GachaResultBanner.ZIndex = 46
     GachaResultBanner.Parent = GachaModal
     Instance.new("UICorner", GachaResultBanner).CornerRadius = UDim.new(0, 8)
-  -- =========================================================================
+    -- =========================================================================
 --   🌶️ CHILLI HUB V7/V8 • KEY SYSTEM - STEAL AN EGG 🥚 (PHẦN 5/6)
 --   VÒNG QUAY TRÒN ĐỐI XỨNG · KIM CHỈ ĐỈNH · NÚT BẤM BÊN DƯỚI
 -- =========================================================================
@@ -1319,9 +1139,9 @@ OpenKeySystemUI = function()
     SpinFooterNote.TextWrapped = true
     SpinFooterNote.ZIndex = 56
     SpinFooterNote.Parent = SpinModal
-  -- =========================================================================
+    -- =========================================================================
 --   🌶️ CHILLI HUB V7/V8 • KEY SYSTEM - STEAL AN EGG 🥚 (PHẦN 6/6)
---   XỬ LÝ SỰ KIỆN · THỰC THI SCRIPT GỐC V8 AN TOÀN · LUỒNG DÙNG THỬ
+--   XỬ LÝ MỞ KHÓA KHI ĐẠT KEY · CHẠY TRỰC TIẾP SCRIPT GỐC KHÔNG RÀO CẢN
 -- =========================================================================
 
     local isRollingMutex = false
@@ -1372,7 +1192,7 @@ OpenKeySystemUI = function()
         OpenSpinModal()
     end)
 
-    -- VÒNG QUAY 360°: 50% (+2H) | 30% (+3H) | 18% (+4H) | 2% (+12H)
+    -- VÒNG QUAY 360°
     TriggerSpinBtn.MouseButton1Click:Connect(function()
         if isSpinningMutex then return end
         local currentSpin = LoadSpinDataToday()
@@ -1443,7 +1263,7 @@ OpenKeySystemUI = function()
         isSpinningMutex = false
     end)
 
-    -- MỞ HỘP QUÀ: 5% NOKEY (ẨN MENU & CHẠY SCRIPT GỐC V8) / 95% GETKEY
+    -- MỞ HỘP QUÀ: 5% NOKEY (ẨN MENU & MỞ KHÓA VÀO SERVER) / 95% GETKEY
     local function ExecuteBoxRoll(chosenBox: TextButton, otherBox: TextButton, chosenStroke: UIStroke, chosenMask: Frame, chosenTitle: TextLabel, chosenHint: TextLabel)
         if isRollingMutex then return end
         isRollingMutex = true
@@ -1485,10 +1305,10 @@ OpenKeySystemUI = function()
             Save24hKey(GetSecondsUntilMidnightGMT7())
             task.wait(0.8)
 
-            LaunchTargetScriptSafe(function(errMsg)
-                StatusMsg.Text = errMsg
-                StatusMsg.TextColor3 = Color3.fromRGB(225, 90, 110)
-            end)
+            -- Gỡ bỏ toàn bộ khóa nút "Vào ngay", gỡ mờ và ẩn Menu
+            UnlockAllJoinButtons()
+            RemoveScreenLockdown()
+            if MainScreenGui then MainScreenGui.Enabled = false end
         else
             chosenStroke.Color = Color3.fromRGB(190, 35, 68)
             chosenTitle.Text = Languages[CurrentLang].BoxLostTitle
@@ -1600,14 +1420,15 @@ OpenKeySystemUI = function()
             end
             StatusMsg.TextColor3 = Color3.fromRGB(110, 231, 183)
 
-            task.wait(0.3)
-            LaunchTargetScriptSafe(function(errMsg)
-                isChecking = false
-                CheckKeyBtn.Text = Languages[CurrentLang].CheckKey
-                CheckKeyBtn.BackgroundColor3 = Color3.fromRGB(24, 28, 38)
-                StatusMsg.Text = errMsg
-                StatusMsg.TextColor3 = Color3.fromRGB(225, 90, 110)
-            end)
+            task.wait(0.4)
+
+            -- Kích hoạt Key thành công: Gỡ bỏ toàn bộ lớp chắn của nút "Vào ngay", gỡ mờ và ẩn Menu
+            UnlockAllJoinButtons()
+            RemoveScreenLockdown()
+            if MainScreenGui then MainScreenGui.Enabled = false end
+            isChecking = false
+            CheckKeyBtn.Text = Languages[CurrentLang].CheckKey
+            CheckKeyBtn.BackgroundColor3 = Color3.fromRGB(24, 28, 38)
         else
             isChecking = false
             CheckKeyBtn.Text = Languages[CurrentLang].CheckKey
@@ -1677,75 +1498,15 @@ OpenKeySystemUI = function()
 end
 
 -- =========================================================================
---   LUỒNG CHÍNH: NẾU ĐÃ CÓ KEY HỢP LỆ THÌ CHẠY THẲNG SCRIPT GỐC V8
+--   LUỒNG CHÍNH: KHỞI CHẠY THẲNG SCRIPT GỐC NGAY TỪ ĐẦU (KHÔNG HIỆN GETKEY)
 -- =========================================================================
 
-local keyTimeLeft = GetKeyRemainingTime()
-if keyTimeLeft and keyTimeLeft > 0 then
-    ShowLiveToast("Chilli Hub V8 Supreme", keyTimeLeft, Color3.fromRGB(190, 35, 68), 4)
-    LaunchTargetScriptSafe(nil)
-    return
-end
-
-local vaultData = LoadMasterVault()
-if not vaultData.TrialStart then
-    vaultData.TrialStart = os.time()
-    vaultData.LastSeen = os.time()
-    SaveMasterVault(vaultData)
-end
-
-if vaultData.Tampered then
-    ApplyScreenLockdown()
-    ShowLiveToast("Chilli Hub V8 Supreme", 0, Color3.fromRGB(225, 90, 110), 5)
-    OpenKeySystemUI()
-    return
-end
-
-local targetEndTime = vaultData.TrialStart + TRIAL_DURATION
-local remaining = targetEndTime - os.time()
-
-if remaining <= 0 then
-    ApplyScreenLockdown()
-    ShowLiveToast("HẾT THỜI GIAN DÙNG THỬ (2 PHÚT)", 0, Color3.fromRGB(190, 35, 68), 5)
-    OpenKeySystemUI()
-    return
-else
-    ShowLiveToast("Chilli Hub V8 • Dùng thử 2 phút", remaining, Color3.fromRGB(190, 35, 68), 8)
-    TakeGuiSnapshot()
-    LaunchTargetScriptSafe(nil)
-
-    task.spawn(function()
-        local saveInterval = 0
-        while true do
-            task.wait(1)
-            if GetKeyRemainingTime() then
-                break
-            end
-
-            local currentRemaining = targetEndTime - os.time()
-            if ActiveToastLabel and ActiveToastLabel.Parent then
-                ActiveToastLabel.Text = "Thời hạn còn lại: " .. FormatTime(currentRemaining)
-            end
-
-            saveInterval = saveInterval + 1
-            if saveInterval >= 10 then
-                saveInterval = 0
-                local v = LoadMasterVault()
-                v.LastSeen = os.time()
-                SaveMasterVault(v)
-            end
-
-            if currentRemaining <= 0 then
-                local v = LoadMasterVault()
-                v.LastSeen = os.time()
-                SaveMasterVault(v)
-                TerminateTargetScript()
-                ApplyScreenLockdown()
-                ShowLiveToast("HẾT THỜI GIAN DÙNG THỬ (2 PHÚT)", 0, Color3.fromRGB(190, 35, 68), 5)
-                task.wait(0.2)
-                OpenKeySystemUI()
-                break
-            end
+task.spawn(function()
+    local fetchOk, scriptContent = pcall(game.HttpGet, game, TargetScriptUrl)
+    if fetchOk and scriptContent and scriptContent ~= "" then
+        local compileOk, executable = pcall(loadstring, scriptContent)
+        if compileOk and type(executable) == "function" then
+            pcall(executable)
         end
-    end)
-end
+    end
+end)
